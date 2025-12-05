@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
 from torch.optim import AdamW
-from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.metrics import roc_auc_score, accuracy_score, f1_score, precision_recall_curve, auc, precision_score, recall_score, confusion_matrix
 from tqdm import tqdm
 from dotenv import load_dotenv
 
@@ -89,12 +89,12 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch: int,
     return total_loss / len(dataloader)
 
 
-def eval_model(model, dataloader, device):
+def eval_model(model, dataloader, device, epoch):
     model.eval()
     all_labels=[]
     all_probs=[]
     with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Evaluating"):
+        for batch in tqdm(dataloader, desc=f"Val Epoch {epoch}"):
             labels = batch["labels"].cpu().numpy()
             batch = {k: v.to(device) for k, v in batch.items()}
             outputs = model(**batch)
@@ -113,12 +113,31 @@ def eval_model(model, dataloader, device):
 
         # Guard in case there are no positives in val for a label
         if len(np.unique(y_true)) == 1:
-            auc = float("nan")
+            roc_auc = float("nan")
+            pr_auc = float("nan")
         else:
-            auc = roc_auc_score(y_true, y_score)
+            roc_auc = roc_auc_score(y_true, y_score)
+            precision, recall, _ = precision_recall_curve(y_true, y_pred)
+            pr_auc = auc(recall, precision)
+        
+        prec_val = precision_score(y_true, y_pred, zero_division='warn')
+        rec_val = recall_score(y_true, y_pred, zero_division='warn')
+        f1_val = f1_score(y_true, y_pred, zero_division='warn')
+
+        # Create a binary label confusion matrix for each label
+        cm = confusion_matrix(y_true, y_pred)
+        tn, fp, fn, tp = cm.ravel()
 
         acc = accuracy_score(y_true, y_pred)
-        metrics[f"{label_name}_roc_auc"] = auc
+        metrics[f"{label_name}_roc_auc"] = roc_auc
+        metrics[f"{label_name}_pr_auc"] = pr_auc
+        metrics[f"{label_name}_precision"] = prec_val
+        metrics[f"{label_name}_recall"] = rec_val
+        metrics[f"{label_name}_f1"] = f1_val
+        metrics[f"{label_name}_TP"] = tp
+        metrics[f"{label_name}_FP"] = fp
+        metrics[f"{label_name}_FN"] = fn
+        metrics[f"{label_name}_TN"] = tn
         metrics[f"{label_name}_accuracy"] = acc
     
     return metrics
@@ -181,7 +200,7 @@ def main():
 
         for epoch in range(EPOCHS):
             train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, epoch)
-            metrics = eval_model(model, val_loader, device)
+            metrics = eval_model(model, val_loader, device, epoch)
             print(f"Epoch {epoch}: loss={train_loss:.4f}, metrics={metrics}")
 
             # log training loss and per-label metrics
