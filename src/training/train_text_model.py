@@ -177,13 +177,11 @@ def main():
         save_path = MODEL_DIR / "model"
         model.save_pretrained(save_path)
         tokenizer.save_pretrained(save_path)
+        print(f"Model and tokenizer saved to {save_path}")
 
-        mlflow.pytorch.log_model(
-            pytorch_model=model,
-            artifact_path="model"
-        )
+        # Log the entire folder (weights + tokenizer + config) to MLflow
+        mlflow.log_artifacts(str(save_path), artifact_path="full_model")
 
-        print(f"Model saved to {save_path}")
 
 if __name__ == "__main__":
     main()
