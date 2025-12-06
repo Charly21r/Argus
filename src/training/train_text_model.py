@@ -246,18 +246,18 @@ def _compute_labelwise_metrics_slice(
         fnr = fn / (fn + tp + 1e-6)
 
         base = f"{prefix}{label_name}"
-        metrics[f"{base}_roc_auc"] = roc_auc
-        metrics[f"{base}_pr_auc"] = pr_auc
-        metrics[f"{base}_precision"] = prec_val
-        metrics[f"{base}_recall"] = rec_val
-        metrics[f"{base}_f1"] = f1_val
-        metrics[f"{base}_accuracy"] = acc
-        metrics[f"{base}_TP"] = tp
-        metrics[f"{base}_FP"] = fp
-        metrics[f"{base}_FN"] = fn
-        metrics[f"{base}_TN"] = tn
-        metrics[f"{base}_FPR"] = fpr
-        metrics[f"{base}_FNR"] = fnr
+        metrics[f"{base}_roc_auc"] = float(roc_auc)
+        metrics[f"{base}_pr_auc"] = float(pr_auc)
+        metrics[f"{base}_precision"] = float(prec_val)
+        metrics[f"{base}_recall"] = float(rec_val)
+        metrics[f"{base}_f1"] = float(f1_val)
+        metrics[f"{base}_accuracy"] = float(acc)
+        metrics[f"{base}_TP"] = int(tp)
+        metrics[f"{base}_FP"] = int(fp)
+        metrics[f"{base}_FN"] = int(fn)
+        metrics[f"{base}_TN"] = int(tn)
+        metrics[f"{base}_FPR"] = float(fpr)
+        metrics[f"{base}_FNR"] = float(fnr)
     
     return metrics
 
