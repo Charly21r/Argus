@@ -7,3 +7,5 @@ TODO.md
 mlruns/
 mlflow.db
 models/
+*.egg-info/
+src/*.egg-info/
