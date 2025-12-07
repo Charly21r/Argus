@@ -2,6 +2,8 @@ from pathlib import Path
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+from data.counterfactual_augmentation import augment_with_counterfactuals
+
 RAW_PATH = Path('data/raw/jigsaw/train.csv')
 OUT_DIR = Path('data/preprocessed/text')
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,7 +59,15 @@ def main():
     df = load_jigsaw()
     df_unified = map_to_policy_labels(df)
     df_train, df_val, df_test = stratified_split(df_unified)
-    
+
+    df_train = augment_with_counterfactuals(
+        df_train,
+        text_col="text",
+        max_augment_per_sample=1,
+        frac=0.7,
+        random_state=RANDOM_STATE
+    )
+
     df_train.to_csv(OUT_DIR / "train.csv", index=False)
     df_val.to_csv(OUT_DIR / "val.csv", index=False)
     df_test.to_csv(OUT_DIR / "test.csv", index=False)
