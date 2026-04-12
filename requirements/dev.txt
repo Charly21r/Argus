@@ -1,0 +1,9 @@
+# Development dependencies (extends training + serving)
+-r training.txt
+-r serving.txt
+pytest>=8.0.0
+ruff>=0.4.0
+mypy>=1.8.0
+ipykernel>=6.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
