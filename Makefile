@@ -24,7 +24,7 @@ format:  ## Auto-format code
 	ruff check --fix src/ scripts/ tests/
 
 serve:  ## Start the API server
-	uvicorn serving.app:app --host 0.0.0.0 --port 8000 --reload --app-dir src
+	uvicorn src.serving.app:app --host 0.0.0.0 --port 8000 --reload --app-dir src
 
 clean:  ## Remove build artifacts and caches
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
