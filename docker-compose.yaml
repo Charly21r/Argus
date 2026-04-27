@@ -1,0 +1,20 @@
+services:
+
+  api:
+    depends_on:
+      - mlflow
+    build: .
+    volumes:
+      - ./models:/app/models
+    environment:
+      - MODEL_PATH=models/text_toxicity/artifacts/model
+    ports:
+      - "8000:8000"
+
+  mlflow:
+    build: ./mlflow_server
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+      - ./mlflow.db:/mlflow.db

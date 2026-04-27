@@ -2,10 +2,10 @@ FROM python:3.12.3-slim
 WORKDIR /app
 
 RUN pip install mlflow
-EXPOSE 5000
+EXPOSE 5001
 
 CMD ["mlflow", "server", \
      "--backend-store-uri", "sqlite:///mlflow.db", \
      "--default-artifact-root", "/mlruns", \
      "--host", "0.0.0.0", \
-     "--port", "5000"]
+     "--port", "5001"]

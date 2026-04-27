@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+data/**/*.csv
+config/local_sensitive_words.json
+TODO.md
+mlruns/
+mlflow.db
+models/
+*.egg-info/
+src/*.egg-info/
+.DS_Store
+.git/
+notebooks/
+reports/
