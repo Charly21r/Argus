@@ -1,0 +1,31 @@
+name: 'Model Validation'
+on:
+  workflow_dispatch:
+
+jobs:
+  bias_evaluation:
+    name: 'Bias Evaluation & Fairness Gate'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v6
+
+      - name: 'Install python'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'pyproject.toml'
+
+      - name: 'Run bias evaluation & fairness gate'
+        run: make test-bias 2>&1 | tee bias-report.txt; exit ${PIPESTATUS[0]}
+
+      - name: 'Upload fairness report'
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: fairness-report
+          path: |
+            bias-report.txt
+            models/text_toxicity/artifacts/bias_report.json
