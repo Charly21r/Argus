@@ -4,13 +4,17 @@ Loads from config/training.yaml with environment variable overrides.
 Env vars use the prefix CMS_ (Content Moderation System), e.g.:
   CMS_TRAINING__EPOCHS=3  (double underscore for nesting)
   CMS_TRAINING__BATCH_SIZE=32
+
+In Colab or other environments, set env vars before the first call to
+get_settings(), or call reload_settings() to pick up changes made after
+the initial load.
 """
 
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,14 +28,14 @@ def _load_yaml_config(path: Path) -> dict:
         return yaml.safe_load(f) or {}
 
 
-class ModelConfig(BaseSettings):
+class ModelConfig(BaseModel):
     name: str = "distilbert-base-uncased"
     num_labels: int = 2
     label_cols: list[str] = ["toxicity", "hate"]
     max_length: int = 256
 
 
-class TrainingConfig(BaseSettings):
+class TrainingConfig(BaseModel):
     epochs: int = 1
     batch_size: int = 16
     learning_rate: float = 2e-5
@@ -39,19 +43,19 @@ class TrainingConfig(BaseSettings):
     mixed_precision: bool = True
 
 
-class DataConfig(BaseSettings):
+class DataConfig(BaseModel):
     raw_path: Path = Path("data/raw/jigsaw/train.csv")
     preprocessed_dir: Path = Path("data/preprocessed/text")
     test_size: float = 0.2
     val_size: float = 0.15
 
 
-class PathsConfig(BaseSettings):
+class PathsConfig(BaseModel):
     model_dir: Path = Path("models/text_toxicity/artifacts")
     sensitive_words_config: Path = Path("config/local_sensitive_words.json")
 
 
-class BiasEvalConfig(BaseSettings):
+class BiasEvalConfig(BaseModel):
     templated_data_path: Path = Path("data/bias_eval/templated_lexical_bias.csv")
     batch_size: int = 32
     max_fpr_delta: float = 0.05
@@ -74,3 +78,9 @@ def get_settings(config_path: Path = _DEFAULT_CONFIG_PATH) -> Settings:
     """Load settings from YAML config with env var overrides."""
     yaml_data = _load_yaml_config(config_path)
     return Settings(**yaml_data)
+
+
+def reload_settings(config_path: Path = _DEFAULT_CONFIG_PATH) -> Settings:
+    """Clear the cache and reload settings. Use in Colab after setting env vars."""
+    get_settings.cache_clear()
+    return get_settings(config_path)
