@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
 
 from config import get_settings
-from training.train_text_model import JigsawDataset, compute_metrics
+from training.train_text_model import TextClassificationDataset, compute_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -162,10 +162,10 @@ def main():
     df_temp["text"] = df_temp["text"].astype(str)
 
     # Build datasets / loaders
-    val_ds = JigsawDataset(df_val, tokenizer, max_length=MAX_LENGTH)
+    val_ds = TextClassificationDataset(df_val, tokenizer, max_length=MAX_LENGTH)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
-    temp_ds = JigsawDataset(df_temp, tokenizer, max_length=MAX_LENGTH)
+    temp_ds = TextClassificationDataset(df_temp, tokenizer, max_length=MAX_LENGTH)
     temp_loader = DataLoader(temp_ds, batch_size=BATCH_SIZE, shuffle=False)
 
     # Predict on Val

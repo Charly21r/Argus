@@ -37,19 +37,21 @@ class TestCalculatePosWeights:
 
 
 class TestFindOptimalThresholds:
+    LABEL_COLS = ["toxicity", "hate"]
+
     def test_returns_dict_with_label_names(self, sample_labels, sample_probs):
-        thresholds = find_optimal_thresholds(sample_labels, sample_probs)
+        thresholds = find_optimal_thresholds(sample_labels, sample_probs, self.LABEL_COLS)
         assert "toxicity" in thresholds
         assert "hate" in thresholds
 
     def test_thresholds_in_range(self, sample_labels, sample_probs):
-        thresholds = find_optimal_thresholds(sample_labels, sample_probs)
+        thresholds = find_optimal_thresholds(sample_labels, sample_probs, self.LABEL_COLS)
         for v in thresholds.values():
             assert 0.0 < v < 1.0
 
     def test_custom_search_space(self, sample_labels, sample_probs):
         space = np.array([0.3, 0.5, 0.7])
-        thresholds = find_optimal_thresholds(sample_labels, sample_probs, search_space=space)
+        thresholds = find_optimal_thresholds(sample_labels, sample_probs, self.LABEL_COLS, search_space=space)
         for v in thresholds.values():
             assert v in space
 
