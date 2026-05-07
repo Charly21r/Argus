@@ -12,10 +12,11 @@ the initial load.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "config" / "training.yaml"
@@ -61,6 +62,18 @@ class BiasEvalConfig(BaseModel):
     max_fpr_delta: float = 0.05
 
 
+class _YamlSource(PydanticBaseSettingsSource):
+    def __init__(self, settings_cls: type[BaseSettings], path: Path) -> None:
+        super().__init__(settings_cls)
+        self._data = _load_yaml_config(path)
+
+    def get_field_value(self, _field: Any, field_name: str) -> Any:
+        return self._data.get(field_name), field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        return self._data
+
+
 class Settings(BaseSettings):
     model_config = {"env_prefix": "CMS_", "env_nested_delimiter": "__"}
 
@@ -72,12 +85,24 @@ class Settings(BaseSettings):
 
     mlflow_tracking_uri: str = "file:./mlruns"
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        yaml_source = _YamlSource(settings_cls, _DEFAULT_CONFIG_PATH)
+        # Priority: env vars > yaml file > defaults
+        return env_settings, yaml_source
+
 
 @lru_cache(maxsize=1)
 def get_settings(config_path: Path = _DEFAULT_CONFIG_PATH) -> Settings:
     """Load settings from YAML config with env var overrides."""
-    yaml_data = _load_yaml_config(config_path)
-    return Settings(**yaml_data)
+    return Settings()
 
 
 def reload_settings(config_path: Path = _DEFAULT_CONFIG_PATH) -> Settings:
