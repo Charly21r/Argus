@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -351,7 +352,7 @@ def run_training(
     device: torch.device,
     cfg,
     lexical_groups: list[str],
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
+) -> tuple[np.ndarray, np.ndarray, list[str], float]:
     epochs = cfg.training.epochs
     label_cols = cfg.model.label_cols
     num_labels = cfg.model.num_labels
@@ -395,7 +396,7 @@ def run_training(
         logger.info("Restored best weights (mean F1=%.4f)", best_mean_f1)
 
     assert val_labels is not None and val_probs is not None and val_texts is not None
-    return val_labels, val_probs, val_texts
+    return val_labels, val_probs, val_texts, best_mean_f1
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +464,16 @@ def main():
     n_train_steps = cfg.training.epochs * len(train_loader)
     model, optimizer, scheduler, grad_scaler, amp_enabled, amp_dtype = setup_model(cfg, device, n_train_steps)
 
-    with mlflow.start_run():
+    git_sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
+    ).stdout.strip() or "unknown"
+    run_name = f"{cfg.model.name.split('/')[-1]}_e{cfg.training.epochs}_lr{cfg.training.learning_rate}"
+
+    with mlflow.start_run(run_name=run_name):
+        mlflow.set_tags({
+            "git_sha": git_sha,
+            "device": str(device),
+        })
         mlflow.log_params({
             "model_name": cfg.model.name,
             "epochs": cfg.training.epochs,
@@ -473,14 +483,21 @@ def main():
             "label_cols": ",".join(cfg.model.label_cols),
             "problem_type": "multi_label_classification",
         })
+        if pos_weights is not None:
+            mlflow.log_params({
+                f"pos_weight_{lab}": round(float(pos_weights[i]), 4)
+                for i, lab in enumerate(cfg.model.label_cols)
+            })
 
-        val_labels, val_probs, _ = run_training(
+        val_labels, val_probs, _, best_mean_f1 = run_training(
             model, train_loader, val_loader, criterion, optimizer, scheduler,
             grad_scaler, amp_enabled, amp_dtype, device, cfg, lexical_groups,
         )
+        mlflow.log_metric("best_mean_f1", best_mean_f1)
 
         calibrated_thresholds = find_optimal_thresholds(val_labels, val_probs, cfg.model.label_cols)
-        mlflow.log_params({f"threshold_{k}": v for k, v in calibrated_thresholds.items()})
+        for k, v in calibrated_thresholds.items():
+            mlflow.log_metric(f"threshold_{k}", v)
 
         save_artifacts(model, tokenizer, calibrated_thresholds, model_dir)
 
