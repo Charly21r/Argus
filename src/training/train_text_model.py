@@ -22,7 +22,7 @@ from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel
+from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, get_linear_schedule_with_warmup
 
 from src.config import get_settings
 from src.utils.lexicon import load_group_terms
@@ -124,6 +124,8 @@ def train_one_epoch(
     grad_scaler: torch.amp.GradScaler,
     epoch: int,
     mixed_precision: bool,
+    amp_dtype: torch.dtype = torch.float16,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     log_every: int = 50,
 ):
     model.train()
@@ -134,19 +136,26 @@ def train_one_epoch(
         inputs = {k: v.to(device) for k, v in batch.items() if k not in ["labels", "text"]}
         labels = batch["labels"].to(device)
 
-        with autocast(device.type, dtype=torch.float16, enabled=mixed_precision):
+        with autocast(device.type, dtype=amp_dtype, enabled=mixed_precision):
             outputs = model(**inputs)
             loss = criterion(outputs.logits, labels)
 
-        grad_scaler.scale(loss).backward()
-        grad_scaler.step(optimizer)
-        grad_scaler.update()
+        if grad_scaler.is_enabled():
+            grad_scaler.scale(loss).backward()
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         optimizer.zero_grad()
+        if scheduler is not None:
+            scheduler.step()
         total_loss += loss.item()
 
-        # log batch training loss every 'log_every' steps
         if step % log_every == 0:
             mlflow.log_metric("train_batch_loss", loss.item(), step=global_step + step)
+            if scheduler is not None:
+                mlflow.log_metric("lr", scheduler.get_last_lr()[0], step=global_step + step)
 
     return total_loss / len(dataloader)
 
@@ -158,6 +167,7 @@ def eval_model(
     epoch: int,
     num_labels: int,
     mixed_precision: bool,
+    amp_dtype: torch.dtype = torch.float16,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     model.eval()
     all_labels = []
@@ -170,10 +180,10 @@ def eval_model(
             texts = batch["text"]
             inputs = {k: v.to(device) for k, v in batch.items() if k not in ["labels", "text"]}
 
-            with autocast(device.type, dtype=torch.float16, enabled=mixed_precision):
+            with autocast(device.type, dtype=amp_dtype, enabled=mixed_precision):
                 outputs = model(**inputs)
                 logits = outputs.logits
-            probs = torch.sigmoid(logits).cpu().numpy()
+            probs = torch.sigmoid(logits).float().cpu().numpy()
             all_labels.append(labels)
             all_probs.append(probs)
             all_texts.extend(texts)
@@ -311,15 +321,23 @@ def main():
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
 
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI") or cfg.mlflow_tracking_uri
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT_NAME", "text_toxicity_moderation"))
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+    logger.info("Using device: %s", device)
 
-    train_df = pd.read_csv(data_dir / "train.csv")
-    val_df = pd.read_csv(data_dir / "val.csv")
+    train_df = pd.read_csv(data_dir / "train.csv")[:3]
+    val_df = pd.read_csv(data_dir / "val.csv")[:2]
 
     pos_weights = calculate_pos_weights(train_df, label_cols).to(device)
     criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weights)
@@ -329,8 +347,9 @@ def main():
     train_ds = JigsawDataset(train_df, tokenizer, label_cols=label_cols, max_length=max_length)
     val_ds = JigsawDataset(val_df, tokenizer, label_cols=label_cols, max_length=max_length)
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size)
+    pin_memory = device.type == "cuda"
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=pin_memory)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, num_workers=2, pin_memory=pin_memory)
 
     hf_config = AutoConfig.from_pretrained(
         model_name,
@@ -344,7 +363,16 @@ def main():
     ).to(device)
 
     optimizer = AdamW(model.parameters(), lr=lr)
-    grad_scaler = GradScaler(device=device.type, enabled=mixed_precision)
+    # GradScaler is CUDA-only; on MPS/CPU mixed precision uses bf16 (no scaling needed).
+    amp_enabled = mixed_precision and device.type in {"cuda", "mps"}
+    amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
+    grad_scaler = GradScaler(device=device.type, enabled=amp_enabled and device.type == "cuda")
+    total_steps = epochs * len(train_loader)
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=max(1, total_steps // 10),
+        num_training_steps=total_steps,
+    )
 
     with mlflow.start_run():
         mlflow.log_params(
@@ -363,10 +391,10 @@ def main():
 
         for epoch in range(epochs):
             train_loss = train_one_epoch(
-                model, train_loader, criterion, optimizer, device, grad_scaler, epoch, mixed_precision
+                model, train_loader, criterion, optimizer, device, grad_scaler, epoch, amp_enabled, amp_dtype=amp_dtype, scheduler=scheduler
             )
             val_labels, val_probs, val_texts = eval_model(
-                model, val_loader, device, epoch, num_labels, mixed_precision
+                model, val_loader, device, epoch, num_labels, amp_enabled, amp_dtype=amp_dtype
             )
             val_metrics = compute_metrics(val_labels, val_probs, val_texts, thresholds, label_cols, lexical_groups)
 
@@ -376,7 +404,7 @@ def main():
             for k, v in val_metrics.items():
                 mlflow.log_metric(k, v, step=epoch)
 
-        val_labels, val_probs, _ = eval_model(model, val_loader, device, epoch, num_labels, mixed_precision)
+        val_labels, val_probs, _ = eval_model(model, val_loader, device, epochs - 1, num_labels, amp_enabled, amp_dtype=amp_dtype)
         calibrated_thresholds = find_optimal_thresholds(val_labels, val_probs, label_cols)
 
         thresholds_path.parent.mkdir(parents=True, exist_ok=True)
