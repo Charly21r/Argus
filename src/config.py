@@ -66,6 +66,7 @@ class OptimizationConfig(BaseModel):
     registered_model_name: str = "content-moderation-text"
     model_alias: str = "Production"
     onnx_dir: Path = Path("models/text_toxicity/onnx")
+    quantized_dir: Path = Path("models/text_toxicity/quantized")
     validation_tolerance: float = 1e-4
 
 

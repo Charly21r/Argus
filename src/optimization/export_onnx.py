@@ -54,7 +54,7 @@ def download_model(version: str | None = None) -> tuple[Path, dict]:
     else:
         mv = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, MODEL_ALIAS)
 
-    logger.info("Exporting %s v%s (run %s)", REGISTERED_MODEL_NAME, mv.version, mv.run_id[:8])
+    logger.info("Exporting %s v%s (run %s)", REGISTERED_MODEL_NAME, mv.version, (mv.run_id or "")[:8])
 
     model_uri = f"models:/{REGISTERED_MODEL_NAME}/{mv.version}"
 

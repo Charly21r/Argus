@@ -32,6 +32,7 @@ optimization:
   registered_model_name: "content-moderation-text"
   model_alias: "Production"
   onnx_dir: "models/text_toxicity/onnx"
+  quantized_dir: "models/text_toxicity/quantized"
   validation_tolerance: 1.0e-4
 
 mlflow_tracking_uri: "file:./mlruns"
