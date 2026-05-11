@@ -431,6 +431,7 @@ def save_artifacts(
     tokenizer,
     calibrated_thresholds: dict,
     model_dir: Path,
+    registered_model_name: str,
 ) -> None:
     thresholds_path = model_dir / "thresholds.json"
     with thresholds_path.open("w") as f:
@@ -442,13 +443,10 @@ def save_artifacts(
     tokenizer.save_pretrained(save_path)
     logger.info("Model and tokenizer saved to %s", save_path)
 
-    # mlflow.log_artifacts(str(save_path), artifact_path="full_model")
-    # mlflow.log_artifact(str(thresholds_path), artifact_path="full_model")
-
     mlflow.transformers.log_model(
         transformers_model={"model": model, "tokenizer": tokenizer},
         artifact_path="model",
-        registered_model_name="content-moderation-text",
+        registered_model_name=registered_model_name,
         metadata={"thresholds": calibrated_thresholds},
         pip_requirements=[
             f"torch=={torch.__version__}",
@@ -546,7 +544,13 @@ def main():
         for k, v in calibrated_thresholds.items():
             mlflow.log_metric(f"threshold_{k}", v)
 
-        save_artifacts(model, tokenizer, calibrated_thresholds, model_dir)
+        save_artifacts(
+            model,
+            tokenizer,
+            calibrated_thresholds,
+            model_dir,
+            registered_model_name=cfg.optimization.registered_model_name,
+        )
 
 
 if __name__ == "__main__":

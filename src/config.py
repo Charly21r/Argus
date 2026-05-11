@@ -62,6 +62,13 @@ class BiasEvalConfig(BaseModel):
     max_fpr_delta: float = 0.05
 
 
+class OptimizationConfig(BaseModel):
+    registered_model_name: str = "content-moderation-text"
+    model_alias: str = "Production"
+    onnx_dir: Path = Path("models/text_toxicity/onnx")
+    validation_tolerance: float = 1e-4
+
+
 class _YamlSource(PydanticBaseSettingsSource):
     def __init__(self, settings_cls: type[BaseSettings], path: Path) -> None:
         super().__init__(settings_cls)
@@ -82,6 +89,7 @@ class Settings(BaseSettings):
     data: DataConfig = Field(default_factory=DataConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     bias_eval: BiasEvalConfig = Field(default_factory=BiasEvalConfig)
+    optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
 
     mlflow_tracking_uri: str = "file:./mlruns"
 
