@@ -9,6 +9,7 @@ import mlflow
 import numpy as np
 import pandas as pd
 import torch
+import transformers
 from sklearn.metrics import (
     accuracy_score,
     auc,
@@ -128,20 +129,22 @@ def _compute_labelwise_metrics_slice(
         tn, fp, fn, tp = cm.ravel()
 
         base = f"{prefix}{label_name}"
-        metrics.update({
-            f"{base}_roc_auc": float(roc_auc),
-            f"{base}_pr_auc": float(pr_auc),
-            f"{base}_precision": float(precision_score(y_true, y_pred, zero_division=0)),
-            f"{base}_recall": float(recall_score(y_true, y_pred, zero_division=0)),
-            f"{base}_f1": float(f1_score(y_true, y_pred, zero_division=0)),
-            f"{base}_accuracy": float(accuracy_score(y_true, y_pred)),
-            f"{base}_TP": int(tp),
-            f"{base}_FP": int(fp),
-            f"{base}_FN": int(fn),
-            f"{base}_TN": int(tn),
-            f"{base}_FPR": float(fp / (fp + tn + 1e-6)),
-            f"{base}_FNR": float(fn / (fn + tp + 1e-6)),
-        })
+        metrics.update(
+            {
+                f"{base}_roc_auc": float(roc_auc),
+                f"{base}_pr_auc": float(pr_auc),
+                f"{base}_precision": float(precision_score(y_true, y_pred, zero_division=0)),
+                f"{base}_recall": float(recall_score(y_true, y_pred, zero_division=0)),
+                f"{base}_f1": float(f1_score(y_true, y_pred, zero_division=0)),
+                f"{base}_accuracy": float(accuracy_score(y_true, y_pred)),
+                f"{base}_TP": int(tp),
+                f"{base}_FP": int(fp),
+                f"{base}_FN": int(fn),
+                f"{base}_TN": int(tn),
+                f"{base}_FPR": float(fp / (fp + tn + 1e-6)),
+                f"{base}_FNR": float(fn / (fn + tp + 1e-6)),
+            }
+        )
 
     return metrics
 
@@ -166,12 +169,18 @@ def compute_metrics(
     non_group_prefix = "val_non_lex_group_"
 
     group_metrics = _compute_labelwise_metrics_slice(
-        labels=all_labels[mask], probs=all_probs[mask], thresholds=thresholds,
-        prefix=group_prefix, label_cols=label_cols,
+        labels=all_labels[mask],
+        probs=all_probs[mask],
+        thresholds=thresholds,
+        prefix=group_prefix,
+        label_cols=label_cols,
     )
     non_group_metrics = _compute_labelwise_metrics_slice(
-        labels=all_labels[~mask], probs=all_probs[~mask], thresholds=thresholds,
-        prefix=non_group_prefix, label_cols=label_cols,
+        labels=all_labels[~mask],
+        probs=all_probs[~mask],
+        thresholds=thresholds,
+        prefix=non_group_prefix,
+        label_cols=label_cols,
     )
     metrics.update(group_metrics)
     metrics.update(non_group_metrics)
@@ -369,14 +378,27 @@ def run_training(
 
     for epoch in range(epochs):
         train_loss = train_one_epoch(
-            model, train_loader, criterion, optimizer, device, grad_scaler,
-            epoch, amp_enabled, amp_dtype=amp_dtype, scheduler=scheduler,
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            grad_scaler,
+            epoch,
+            amp_enabled,
+            amp_dtype=amp_dtype,
+            scheduler=scheduler,
             on_step_end=_log_step,
         )
 
         val_labels, val_probs, val_texts = eval_model(
-            model, val_loader, device, num_labels, amp_enabled,
-            amp_dtype=amp_dtype, desc=f"Epoch {epoch} val",
+            model,
+            val_loader,
+            device,
+            num_labels,
+            amp_enabled,
+            amp_dtype=amp_dtype,
+            desc=f"Epoch {epoch} val",
         )
         val_metrics = compute_metrics(val_labels, val_probs, val_texts, thresholds, label_cols, lexical_groups)
 
@@ -420,8 +442,19 @@ def save_artifacts(
     tokenizer.save_pretrained(save_path)
     logger.info("Model and tokenizer saved to %s", save_path)
 
-    mlflow.log_artifacts(str(save_path), artifact_path="full_model")
-    mlflow.log_artifact(str(thresholds_path), artifact_path="full_model")
+    # mlflow.log_artifacts(str(save_path), artifact_path="full_model")
+    # mlflow.log_artifact(str(thresholds_path), artifact_path="full_model")
+
+    mlflow.transformers.log_model(
+        transformers_model={"model": model, "tokenizer": tokenizer},
+        artifact_path="model",
+        registered_model_name="content-moderation-text",
+        metadata={"thresholds": calibrated_thresholds},
+        pip_requirements=[
+            f"torch=={torch.__version__}",
+            f"transformers=={transformers.__version__}",
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -464,34 +497,48 @@ def main():
     n_train_steps = cfg.training.epochs * len(train_loader)
     model, optimizer, scheduler, grad_scaler, amp_enabled, amp_dtype = setup_model(cfg, device, n_train_steps)
 
-    git_sha = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
-    ).stdout.strip() or "unknown"
+    git_sha = (
+        subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+        or "unknown"
+    )
     run_name = f"{cfg.model.name.split('/')[-1]}_e{cfg.training.epochs}_lr{cfg.training.learning_rate}"
 
     with mlflow.start_run(run_name=run_name):
-        mlflow.set_tags({
-            "git_sha": git_sha,
-            "device": str(device),
-        })
-        mlflow.log_params({
-            "model_name": cfg.model.name,
-            "epochs": cfg.training.epochs,
-            "batch_size": cfg.training.batch_size,
-            "lr": cfg.training.learning_rate,
-            "max_length": cfg.model.max_length,
-            "label_cols": ",".join(cfg.model.label_cols),
-            "problem_type": "multi_label_classification",
-        })
+        mlflow.set_tags(
+            {
+                "git_sha": git_sha,
+                "device": str(device),
+            }
+        )
+        mlflow.log_params(
+            {
+                "model_name": cfg.model.name,
+                "epochs": cfg.training.epochs,
+                "batch_size": cfg.training.batch_size,
+                "lr": cfg.training.learning_rate,
+                "max_length": cfg.model.max_length,
+                "label_cols": ",".join(cfg.model.label_cols),
+                "problem_type": "multi_label_classification",
+            }
+        )
         if pos_weights is not None:
-            mlflow.log_params({
-                f"pos_weight_{lab}": round(float(pos_weights[i]), 4)
-                for i, lab in enumerate(cfg.model.label_cols)
-            })
+            mlflow.log_params(
+                {f"pos_weight_{lab}": round(float(pos_weights[i]), 4) for i, lab in enumerate(cfg.model.label_cols)}
+            )
 
         val_labels, val_probs, _, best_mean_f1 = run_training(
-            model, train_loader, val_loader, criterion, optimizer, scheduler,
-            grad_scaler, amp_enabled, amp_dtype, device, cfg, lexical_groups,
+            model,
+            train_loader,
+            val_loader,
+            criterion,
+            optimizer,
+            scheduler,
+            grad_scaler,
+            amp_enabled,
+            amp_dtype,
+            device,
+            cfg,
+            lexical_groups,
         )
         mlflow.log_metric("best_mean_f1", best_mean_f1)
 
