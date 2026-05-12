@@ -8,8 +8,8 @@ import torch
 from src.config import get_settings
 from src.training.train_text_model import TextClassificationDataset, compute_metrics
 from src.utils.lexicon import load_group_terms
+from src.utils.loading import load_model_and_tokenizer, load_thresholds
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -30,35 +30,6 @@ MODEL_NAME = _settings.model.name
 NUM_LABELS = _settings.model.num_labels
 MAX_LENGTH = _settings.model.max_length
 BATCH_SIZE = _settings.bias_eval.batch_size
-
-
-def load_thresholds(path: Path) -> dict[str, float]:
-    if not path.exists():
-        return {label: 0.5 for label in LABEL_COLS}
-    with path.open("r") as f:
-        th = json.load(f)
-    return {label: float(th.get(label, 0.5)) for label in LABEL_COLS}
-
-
-def load_model_and_tokenizer(model_path: Path, device: torch.device):
-    """Load model and tokenizer from model_path. Auto-detects ONNX vs PyTorch."""
-    is_ort = (model_path / "model.onnx").exists()
-    if is_ort:
-        from optimum.onnxruntime import ORTModelForSequenceClassification
-
-        model = ORTModelForSequenceClassification.from_pretrained(model_path)
-    else:
-        model_source = model_path if model_path.exists() else MODEL_NAME
-        config = AutoConfig.from_pretrained(
-            model_source,
-            num_labels=NUM_LABELS,
-            problem_type="multi_label_classification",
-        )
-        model = AutoModelForSequenceClassification.from_pretrained(model_source, config=config).to(device)
-        model.eval()
-
-    tokenizer = AutoTokenizer.from_pretrained(model_path if model_path.exists() else MODEL_NAME)
-    return model, tokenizer
 
 
 def compute_identity_sensitivity(
