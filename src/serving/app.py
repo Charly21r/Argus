@@ -31,6 +31,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 @app.get("/v1/health")
 def health():
     return {"is_loaded": is_loaded()}
@@ -89,4 +90,3 @@ def metrics():
 
 # @app.post("/v1/moderate/text/batch")
 # TODO: implement
-

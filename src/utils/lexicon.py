@@ -25,6 +25,7 @@ def load_sensitive_config(path: Path = DEFAULT_SENSITIVE_CFG_PATH) -> dict[str, 
 
     return cast(dict[str, Any], data)
 
+
 def load_group_terms(path: Path = DEFAULT_SENSITIVE_CFG_PATH) -> list[str]:
     """Load flat list of identity group terms for bias evaluation."""
     cfg = load_sensitive_config(path)
