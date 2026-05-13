@@ -33,6 +33,7 @@ from transformers import (
 )
 
 from src.config import get_settings
+from src.training.losses import BinaryFocalLossWithLogits
 from src.utils.lexicon import load_group_terms
 
 logger = logging.getLogger(__name__)
@@ -490,7 +491,8 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(cfg.model.name)
 
     train_loader, val_loader, pos_weights = setup_data(cfg, tokenizer, device)
-    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weights)
+    # criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weights)
+    criterion = BinaryFocalLossWithLogits(pos_weight=pos_weights)
 
     n_train_steps = cfg.training.epochs * len(train_loader)
     model, optimizer, scheduler, grad_scaler, amp_enabled, amp_dtype = setup_model(cfg, device, n_train_steps)
