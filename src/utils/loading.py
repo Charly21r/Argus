@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import torch
-from optimum.onnxruntime import ORTModelForSequenceClassification
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer
 
 from src.config import get_settings
@@ -28,6 +27,8 @@ def load_model_and_tokenizer(model_path: Path, device: torch.device):
     """Load model and tokenizer from model_path. Auto-detects ONNX vs PyTorch."""
     is_ort = any(model_path.glob("*.onnx"))
     if is_ort:
+        from optimum.onnxruntime import ORTModelForSequenceClassification
+
         model = ORTModelForSequenceClassification.from_pretrained(model_path)
     else:
         model_source = model_path if model_path.exists() else MODEL_NAME

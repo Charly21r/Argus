@@ -1,6 +1,7 @@
-# Development dependencies (extends training + serving)
+# Development dependencies (extends training + serving + optimization)
 -r training.txt
 -r serving.txt
+-r optimization.txt
 pytest>=8.0.0
 ruff>=0.4.0
 mypy>=1.8.0
