@@ -29,7 +29,7 @@ bias_eval:
   max_fpr_delta: 0.05
 
 optimization:
-  registered_model_name: "content-moderation-text"
+  registered_model_name: "workspace.default.content-moderation-text"
   model_alias: "Production"
   onnx_dir: "models/text_toxicity/onnx"
   quantized_dir: "models/text_toxicity/quantized"

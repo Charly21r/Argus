@@ -63,7 +63,7 @@ class BiasEvalConfig(BaseModel):
 
 
 class OptimizationConfig(BaseModel):
-    registered_model_name: str = "content-moderation-text"
+    registered_model_name: str = "workspace.default.content-moderation-text"
     model_alias: str = "Production"
     onnx_dir: Path = Path("models/text_toxicity/onnx")
     quantized_dir: Path = Path("models/text_toxicity/quantized")
