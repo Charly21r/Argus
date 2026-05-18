@@ -42,6 +42,8 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 2e-5
     seed: int = 42
     mixed_precision: bool = True
+    loss_fn: str = "bce"
+    focal_gamma: float = 2.0
 
 
 class DataConfig(BaseModel):

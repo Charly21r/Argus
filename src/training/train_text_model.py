@@ -491,8 +491,12 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(cfg.model.name)
 
     train_loader, val_loader, pos_weights = setup_data(cfg, tokenizer, device)
-    # criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weights)
-    criterion = BinaryFocalLossWithLogits(pos_weight=pos_weights)
+
+    criterion: torch.nn.Module
+    if cfg.training.loss_fn == "focal":
+        criterion = BinaryFocalLossWithLogits(gamma=cfg.training.focal_gamma, pos_weight=pos_weights)
+    else:
+        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weights)
 
     n_train_steps = cfg.training.epochs * len(train_loader)
     model, optimizer, scheduler, grad_scaler, amp_enabled, amp_dtype = setup_model(cfg, device, n_train_steps)
@@ -510,6 +514,9 @@ def main():
                 "device": str(device),
             }
         )
+        loss_params: dict = {"loss_fn": cfg.training.loss_fn}
+        if cfg.training.loss_fn == "focal":
+            loss_params["focal_gamma"] = cfg.training.focal_gamma
         mlflow.log_params(
             {
                 "model_name": cfg.model.name,
@@ -519,6 +526,7 @@ def main():
                 "max_length": cfg.model.max_length,
                 "label_cols": ",".join(cfg.model.label_cols),
                 "problem_type": "multi_label_classification",
+                **loss_params,
             }
         )
         if pos_weights is not None:

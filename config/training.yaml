@@ -12,6 +12,8 @@ training:
   learning_rate: 2.0e-5
   seed: 42
   mixed_precision: true
+  loss_fn: "bce"       # "bce" or "focal"
+  focal_gamma: 2.0     # only used when loss_fn is "focal"
 
 data:
   raw_path: "data/raw/jigsaw/train.csv"
