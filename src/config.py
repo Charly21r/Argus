@@ -12,7 +12,7 @@ the initial load.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -72,6 +72,11 @@ class OptimizationConfig(BaseModel):
     validation_tolerance: float = 1e-4
 
 
+class ServingConfig(BaseModel):
+    backend: Literal["pt", "onnx"] = "pt"
+    onnx_provider: Literal["CPUExecutionProvider", "CUDAExecutionProvider"] = "CPUExecutionProvider"
+
+
 class _YamlSource(PydanticBaseSettingsSource):
     def __init__(self, settings_cls: type[BaseSettings], path: Path) -> None:
         super().__init__(settings_cls)
@@ -93,6 +98,7 @@ class Settings(BaseSettings):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     bias_eval: BiasEvalConfig = Field(default_factory=BiasEvalConfig)
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
+    serving: ServingConfig = Field(default_factory=ServingConfig)
 
     mlflow_tracking_uri: str = "file:./mlruns"
 

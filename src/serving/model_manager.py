@@ -2,39 +2,56 @@ import json
 from pathlib import Path
 
 import torch
+from src.config import get_settings
 from src.serving.schemas import LabelResult
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 
 # Module-level singleton
 _tokenizer: PreTrainedTokenizerBase | None = None
 _model: PreTrainedModel | None = None
-_model_path: str | None = None
+_model_path: Path | None = None
 _device: str = "cpu"
 _thresholds: dict = {}
 _label_cols = ["toxicity", "hate"]
 
 
-def load_model(model_path: str) -> None:
+def load_model() -> None:
     """Load tokenizer and model from local path. Call this from the FastAPI lifespan."""
     global _tokenizer, _model, _model_path, _device, _thresholds, _label_cols
+    _settings = get_settings()
+    backend = _settings.serving.backend
 
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif torch.backends.mps.is_available():
-        device = "mps"
+    if backend == "pt":
+        _model_path = _settings.paths.model_dir
+
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            print("Warning! The model and tokenizer are being loaded on the CPU.")
+            device = "cpu"
+
+        _model = AutoModelForSequenceClassification.from_pretrained(_model_path).to(device)
+        _model.eval()
+        _device = device
+        thresholds_path = Path(_model_path).parent / "thresholds.json"
+
+    elif backend == "onnx":
+        from optimum.onnxruntime import ORTModelForSequenceClassification
+
+        _model_path = _settings.optimization.onnx_dir
+        provider = _settings.serving.onnx_provider
+        _model = ORTModelForSequenceClassification.from_pretrained(_model_path, provider=provider)
+        _device = "cuda" if provider == "CUDAExecutionProvider" else "cpu"
+        thresholds_path = Path(_model_path) / "thresholds.json"
+
     else:
-        print("Warning! The model and tokenizer are being loaded on the CPU.")
-        device = "cpu"
+        raise ValueError(f"Unknown backend {backend!r}. Set CMS_SERVING__BACKEND to 'pt' or 'onnx'.")
 
-    # _label_cols = [_model.config.id2label[i] for i in range(_model.config.num_labels)]
-    _tokenizer = AutoTokenizer.from_pretrained(model_path)
-    _model = AutoModelForSequenceClassification.from_pretrained(model_path).to(device)
-    _model.eval()
-    _model_path = model_path
-    _device = device
+    _tokenizer = AutoTokenizer.from_pretrained(_model_path)
 
     # Load thresholds per label
-    thresholds_path = Path(_model_path).parent / "thresholds.json"
     with open(thresholds_path) as f:
         _thresholds = json.load(f)
 

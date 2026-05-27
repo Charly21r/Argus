@@ -1,4 +1,3 @@
-import os
 from contextlib import asynccontextmanager
 from time import perf_counter
 
@@ -20,7 +19,7 @@ from src.serving.tracing import setup_tracing, tracer
 @asynccontextmanager
 async def lifespan(app):
     setup_tracing()
-    load_model(os.getenv("MODEL_PATH", "models/text_toxicity/artifacts/model"))
+    load_model()
     yield
 
 
