@@ -81,7 +81,7 @@ def get_model_info() -> dict:
         "model_path": _model_path,
         "device": _device,
         "is_loaded": is_loaded(),
-        "thesholds": _thresholds,
+        "thresholds": _thresholds,
         "label_cols": _label_cols,
     }
 
