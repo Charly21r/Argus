@@ -11,8 +11,8 @@ from src.serving.metrics import (
     REQUEST_COUNT,
     REQUEST_LATENCY,
 )
-from src.serving.model_manager import get_model_info, is_loaded, load_model, predict
-from src.serving.schemas import ModerationResult, TextInput
+from src.serving.model_manager import get_model_info, is_loaded, load_model, predict, predict_batch
+from src.serving.schemas import BatchTextRequest, BatchTextResponse, ModerationResult, TextInput
 from src.serving.tracing import setup_tracing, tracer
 
 
@@ -87,5 +87,47 @@ def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-# @app.post("/v1/moderate/text/batch")
-# TODO: implement
+@app.post("/v1/moderate/text/batch")
+def moderate_batch(batch: BatchTextRequest) -> BatchTextResponse:
+    with tracer.start_as_current_span("moderate_text_batch") as span:
+        span.set_attribute("batch.size", len(batch.items))
+
+        with REQUEST_LATENCY.labels(endpoint="/v1/moderate/text/batch").time():
+            with tracer.start_as_current_span("model_inference"):
+                start = perf_counter()
+                results = predict_batch([item.content for item in batch.items])
+                total_processing_time_ms = perf_counter() - start
+                INFERENCE_LATENCY.observe(total_processing_time_ms)
+
+            with tracer.start_as_current_span("post_processing"):
+                moderation_results = []
+                for item, (toxicity, hate) in zip(batch.items, results, strict=True):
+                    safe = not (toxicity.flagged or hate.flagged)
+
+                    if toxicity.flagged:
+                        PREDICTION_DISTRIBUTION.labels(label="toxic").inc()
+                    if hate.flagged:
+                        PREDICTION_DISTRIBUTION.labels(label="hate").inc()
+                    if safe:
+                        PREDICTION_DISTRIBUTION.labels(label="safe").inc()
+
+                    MODEL_CONFIDENCE.labels(label="toxicity").observe(toxicity.prob)
+                    MODEL_CONFIDENCE.labels(label="hate").observe(hate.prob)
+
+                    moderation_results.append(
+                        ModerationResult(
+                            id=item.id,
+                            text=item.content,
+                            toxicity=toxicity,
+                            hate=hate,
+                            safe=safe,
+                            processing_time_ms=total_processing_time_ms / len(batch.items),
+                        )
+                    )
+
+    REQUEST_COUNT.labels(endpoint="/v1/moderate/text/batch", status_code="200").inc()
+
+    return BatchTextResponse(
+        items=moderation_results,
+        total_processing_time_ms=total_processing_time_ms,
+    )

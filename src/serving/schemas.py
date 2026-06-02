@@ -20,3 +20,12 @@ class ModerationResult(BaseModel):
     hate: LabelResult
     safe: bool
     processing_time_ms: float
+
+
+class BatchTextRequest(BaseModel):
+    items: list[TextInput] = Field(min_length=1, max_length=100)
+
+
+class BatchTextResponse(BaseModel):
+    items: list[ModerationResult]
+    total_processing_time_ms: float

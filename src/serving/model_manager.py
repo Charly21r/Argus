@@ -91,6 +91,34 @@ def predict(text: str) -> tuple[LabelResult, LabelResult]:
     return toxicity, hate
 
 
+def predict_batch(texts: list[str]) -> list[tuple[LabelResult, LabelResult]]:
+    """Run inference on multiple texts in a single forward pass."""
+    if not is_loaded():
+        raise RuntimeError("Model is not loaded")
+
+    assert _tokenizer is not None
+    assert _model is not None
+
+    inputs = _tokenizer(
+        texts,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
+    )
+    inputs = {k: v.to(_device) for k, v in inputs.items()}
+
+    with torch.inference_mode():
+        outputs = _model(**inputs)
+        probs = torch.sigmoid(outputs.logits)
+
+    results = []
+    for row in probs:
+        toxicity = LabelResult(prob=row[0].item(), flagged=(row[0] > _thresholds["toxicity"]).item())
+        hate = LabelResult(prob=row[1].item(), flagged=(row[1] > _thresholds["hate"]).item())
+        results.append((toxicity, hate))
+    return results
+
+
 def get_model_info() -> dict:
     """Return metadata for the /v1/model/info endpoint."""
 
