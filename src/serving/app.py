@@ -43,43 +43,46 @@ def model_info():
 
 @app.post("/v1/moderate/text")
 def moderate(text: TextInput) -> ModerationResult:
-    with tracer.start_as_current_span("moderate_text") as span:
-        span.set_attribute("input.length", len(text.content))
+    status_code = "500"
+    try:
+        with tracer.start_as_current_span("moderate_text") as span:
+            span.set_attribute("input.length", len(text.content))
 
-        with REQUEST_LATENCY.labels(endpoint="/v1/moderate/text").time():
-            with tracer.start_as_current_span("model_inference"):
-                start = perf_counter()
-                result = predict(text.content)
-                processing_time_ms = perf_counter() - start
-                INFERENCE_LATENCY.observe(processing_time_ms)
+            with REQUEST_LATENCY.labels(endpoint="/v1/moderate/text").time():
+                with tracer.start_as_current_span("model_inference"):
+                    start = perf_counter()
+                    result = predict(text.content)
+                    processing_time_ms = perf_counter() - start
+                    INFERENCE_LATENCY.observe(processing_time_ms)
 
-            safe = not (result[0].flagged or result[1].flagged)
+                safe = not (result[0].flagged or result[1].flagged)
 
-            with tracer.start_as_current_span("post_processing"):
-                if result[0].flagged:
-                    PREDICTION_DISTRIBUTION.labels(label="toxic").inc()
-                if result[1].flagged:
-                    PREDICTION_DISTRIBUTION.labels(label="hate").inc()
-                if safe:
-                    PREDICTION_DISTRIBUTION.labels(label="safe").inc()
+                with tracer.start_as_current_span("post_processing"):
+                    if result[0].flagged:
+                        PREDICTION_DISTRIBUTION.labels(label="toxic").inc()
+                    if result[1].flagged:
+                        PREDICTION_DISTRIBUTION.labels(label="hate").inc()
+                    if safe:
+                        PREDICTION_DISTRIBUTION.labels(label="safe").inc()
 
-                MODEL_CONFIDENCE.labels(label="toxicity").observe(result[0].prob)
-                MODEL_CONFIDENCE.labels(label="hate").observe(result[1].prob)
+                    MODEL_CONFIDENCE.labels(label="toxicity").observe(result[0].prob)
+                    MODEL_CONFIDENCE.labels(label="hate").observe(result[1].prob)
 
-        span.set_attribute("result.safe", safe)
-        span.set_attribute("result.toxicity_score", result[0].prob)
-        span.set_attribute("result.hate_score", result[1].prob)
+            span.set_attribute("result.safe", safe)
+            span.set_attribute("result.toxicity_score", result[0].prob)
+            span.set_attribute("result.hate_score", result[1].prob)
 
-    REQUEST_COUNT.labels(endpoint="/v1/moderate/text", status_code="200").inc()
-
-    return ModerationResult(
-        id=text.id,
-        text=text.content,
-        toxicity=result[0],
-        hate=result[1],
-        safe=safe,
-        processing_time_ms=processing_time_ms,
-    )
+        status_code = "200"
+        return ModerationResult(
+            id=text.id,
+            text=text.content,
+            toxicity=result[0],
+            hate=result[1],
+            safe=safe,
+            processing_time_ms=processing_time_ms,
+        )
+    finally:
+        REQUEST_COUNT.labels(endpoint="/v1/moderate/text", status_code=status_code).inc()
 
 
 @app.get("/metrics")
@@ -89,45 +92,48 @@ def metrics():
 
 @app.post("/v1/moderate/text/batch")
 def moderate_batch(batch: BatchTextRequest) -> BatchTextResponse:
-    with tracer.start_as_current_span("moderate_text_batch") as span:
-        span.set_attribute("batch.size", len(batch.items))
+    status_code = "500"
+    try:
+        with tracer.start_as_current_span("moderate_text_batch") as span:
+            span.set_attribute("batch.size", len(batch.items))
 
-        with REQUEST_LATENCY.labels(endpoint="/v1/moderate/text/batch").time():
-            with tracer.start_as_current_span("model_inference"):
-                start = perf_counter()
-                results = predict_batch([item.content for item in batch.items])
-                total_processing_time_ms = perf_counter() - start
-                INFERENCE_LATENCY.observe(total_processing_time_ms)
+            with REQUEST_LATENCY.labels(endpoint="/v1/moderate/text/batch").time():
+                with tracer.start_as_current_span("model_inference"):
+                    start = perf_counter()
+                    results = predict_batch([item.content for item in batch.items])
+                    total_processing_time_ms = perf_counter() - start
+                    INFERENCE_LATENCY.observe(total_processing_time_ms)
 
-            with tracer.start_as_current_span("post_processing"):
-                moderation_results = []
-                for item, (toxicity, hate) in zip(batch.items, results, strict=True):
-                    safe = not (toxicity.flagged or hate.flagged)
+                with tracer.start_as_current_span("post_processing"):
+                    moderation_results = []
+                    for item, (toxicity, hate) in zip(batch.items, results, strict=True):
+                        safe = not (toxicity.flagged or hate.flagged)
 
-                    if toxicity.flagged:
-                        PREDICTION_DISTRIBUTION.labels(label="toxic").inc()
-                    if hate.flagged:
-                        PREDICTION_DISTRIBUTION.labels(label="hate").inc()
-                    if safe:
-                        PREDICTION_DISTRIBUTION.labels(label="safe").inc()
+                        if toxicity.flagged:
+                            PREDICTION_DISTRIBUTION.labels(label="toxic").inc()
+                        if hate.flagged:
+                            PREDICTION_DISTRIBUTION.labels(label="hate").inc()
+                        if safe:
+                            PREDICTION_DISTRIBUTION.labels(label="safe").inc()
 
-                    MODEL_CONFIDENCE.labels(label="toxicity").observe(toxicity.prob)
-                    MODEL_CONFIDENCE.labels(label="hate").observe(hate.prob)
+                        MODEL_CONFIDENCE.labels(label="toxicity").observe(toxicity.prob)
+                        MODEL_CONFIDENCE.labels(label="hate").observe(hate.prob)
 
-                    moderation_results.append(
-                        ModerationResult(
-                            id=item.id,
-                            text=item.content,
-                            toxicity=toxicity,
-                            hate=hate,
-                            safe=safe,
-                            processing_time_ms=total_processing_time_ms / len(batch.items),
+                        moderation_results.append(
+                            ModerationResult(
+                                id=item.id,
+                                text=item.content,
+                                toxicity=toxicity,
+                                hate=hate,
+                                safe=safe,
+                                processing_time_ms=total_processing_time_ms / len(batch.items),
+                            )
                         )
-                    )
 
-    REQUEST_COUNT.labels(endpoint="/v1/moderate/text/batch", status_code="200").inc()
-
-    return BatchTextResponse(
-        items=moderation_results,
-        total_processing_time_ms=total_processing_time_ms,
-    )
+        status_code = "200"
+        return BatchTextResponse(
+            items=moderation_results,
+            total_processing_time_ms=total_processing_time_ms,
+        )
+    finally:
+        REQUEST_COUNT.labels(endpoint="/v1/moderate/text/batch", status_code=status_code).inc()
