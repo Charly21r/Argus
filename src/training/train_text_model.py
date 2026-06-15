@@ -100,6 +100,46 @@ def find_optimal_thresholds(
     return thresholds
 
 
+def find_thresholds_at_min_recall(
+    all_labels: np.ndarray,
+    all_probs: np.ndarray,
+    label_cols: list[str],
+    min_recall: float = 0.85,
+) -> dict:
+    """Per-label: highest-precision threshold where recall >= min_recall.
+
+    Production-oriented calibration: missing toxic content (FN) is more costly
+    than over-flagging (FP), but we still want to minimise over-blocking.
+    Falls back to the lowest available threshold if min_recall is unreachable.
+    """
+    thresholds = {}
+    for i, label_name in enumerate(label_cols):
+        y_true = all_labels[:, i]
+        y_score = all_probs[:, i]
+
+        precision_vals, recall_vals, thresh_vals = precision_recall_curve(y_true, y_score)
+        # sklearn appends an artificial last point (precision=1, recall=0) with no
+        # corresponding threshold — drop it so indices align with thresh_vals.
+        precision_vals = precision_vals[:-1]
+        recall_vals = recall_vals[:-1]
+
+        mask = recall_vals >= min_recall
+        if not mask.any():
+            logger.warning(
+                "Label '%s' cannot reach recall=%.2f at any threshold; falling back to minimum threshold.",
+                label_name,
+                min_recall,
+            )
+            thresholds[label_name] = float(thresh_vals[0])
+        else:
+            # Pick the candidate with the highest precision (most conservative
+            # threshold) that still satisfies the recall floor.
+            best_idx = int(np.argmax(precision_vals[mask]))
+            thresholds[label_name] = float(thresh_vals[np.where(mask)[0][best_idx]])
+
+    return thresholds
+
+
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -526,6 +566,7 @@ def main():
                 "max_length": cfg.model.max_length,
                 "label_cols": ",".join(cfg.model.label_cols),
                 "problem_type": "multi_label_classification",
+                "min_recall": cfg.training.min_recall,
                 **loss_params,
             }
         )
@@ -534,7 +575,7 @@ def main():
                 {f"pos_weight_{lab}": round(float(pos_weights[i]), 4) for i, lab in enumerate(cfg.model.label_cols)}
             )
 
-        val_labels, val_probs, _, best_mean_f1 = run_training(
+        val_labels, val_probs, val_texts, best_mean_f1 = run_training(
             model,
             train_loader,
             val_loader,
@@ -550,14 +591,41 @@ def main():
         )
         mlflow.log_metric("best_mean_f1", best_mean_f1)
 
-        calibrated_thresholds = find_optimal_thresholds(val_labels, val_probs, cfg.model.label_cols)
-        for k, v in calibrated_thresholds.items():
-            mlflow.log_metric(f"threshold_{k}", v)
+        # F1-optimal thresholds (training-time reference)
+        f1_thresholds = find_optimal_thresholds(val_labels, val_probs, cfg.model.label_cols)
+        for k, v in f1_thresholds.items():
+            mlflow.log_metric(f"threshold_f1_{k}", v)
+
+        # Production thresholds: highest precision at recall >= min_recall
+        prod_thresholds = find_thresholds_at_min_recall(
+            val_labels, val_probs, cfg.model.label_cols, cfg.training.min_recall
+        )
+        for k, v in prod_thresholds.items():
+            mlflow.log_metric(f"threshold_prod_{k}", v)
+
+        # Log final metrics under both strategies so runs are comparable in MLflow
+        f1_metrics = compute_metrics(
+            val_labels, val_probs, val_texts, f1_thresholds, cfg.model.label_cols, lexical_groups
+        )
+        prod_metrics = compute_metrics(
+            val_labels, val_probs, val_texts, prod_thresholds, cfg.model.label_cols, lexical_groups
+        )
+        for k, v in f1_metrics.items():
+            mlflow.log_metric(f"f1_thresh_{k}", v)
+        for k, v in prod_metrics.items():
+            mlflow.log_metric(f"prod_thresh_{k}", v)
+
+        logger.info(
+            "Threshold comparison — F1: %s | prod (recall>=%.2f): %s",
+            f1_thresholds,
+            cfg.training.min_recall,
+            prod_thresholds,
+        )
 
         save_artifacts(
             model,
             tokenizer,
-            calibrated_thresholds,
+            prod_thresholds,
             model_dir,
             registered_model_name=cfg.optimization.registered_model_name,
         )

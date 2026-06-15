@@ -44,6 +44,7 @@ class TrainingConfig(BaseModel):
     mixed_precision: bool = True
     loss_fn: str = "bce"
     focal_gamma: float = 2.0
+    min_recall: float = 0.85
 
 
 class DataConfig(BaseModel):
