@@ -25,52 +25,103 @@ Argus detects toxic and hateful content across three modalities:
 | Image (screenshots, photos) | In progress |
 | Multimodal (memes: text + image) | In progress |
 
-All models share a unified output schema, designed for plug-in integration with Trust & Safety dashboards, real-time moderation APIs, and enterprise safety pipelines.
-
 ---
 
 ## Key Features
 
 - **Multi-label classification** — simultaneous toxicity + hate detection per input
-- **Transformer-based text model** — DistilBERT fine-tuned on Jigsaw Toxic Comments
-- **Threshold calibration** — per-label F1-optimal thresholds, not hard 0.5 defaults
-- **Fairness-aware evaluation** — slice-level FPR/TPR across identity groups with CI enforcement
-- **Counterfactual augmentation** — synthetic identity-swapped examples to reduce lexical bias
-- **MLflow tracking** — full reproducibility with artifact and metric logging
-- **REST API** — FastAPI serving layer with structured request/response schemas
-- **Containerized** — Docker + Docker Compose for local and production deployment
+- **Transformer-based text model** — fine-tuned on Jigsaw Toxic Comments
+- **Precision-at-recall threshold calibration** — production-oriented thresholds, not hard 0.5 defaults
+- **Fairness-aware training** — counterfactual data augmentation to reduce lexical bias
+- **Fairness evaluation** — slice-level FPR/TPR across identity groups with CI enforcement
+- **MLflow tracking** — full reproducibility with artifact and metric logging; Databricks-hosted registry supported
+- **Dual inference backends** — PyTorch or ONNX Runtime (INT8 quantized)
+- **REST API** — FastAPI with single and batch endpoints
+- **Containerized** — Docker + Docker Compose (API + MLflow + Prometheus + Grafana)
 - **Observability** — Prometheus metrics + Grafana dashboards
 
 ---
 
-## Architecture
+## Setup
 
+**Requirements:** Python 3.11+
+
+```bash
+git clone https://github.com/Charly21r/content-moderation-system
+cd content-moderation-system
+pip install -e .
 ```
-                        ┌─────────────────────────────────┐
-                        │           Argus API              │
-                        │         (FastAPI / REST)         │
-                        └────────────┬────────────────────┘
-                                     │
-              ┌──────────────────────┼───────────────────────┐
-              ▼                      ▼                        ▼
-     ┌────────────────┐   ┌──────────────────┐   ┌──────────────────────┐
-     │  Text Model    │   │  Image Model     │   │  Multimodal Model    │
-     │  (DistilBERT)  │   │  (ViT / CNN)     │   │  (text + image enc.) │
-     │                │   │  [in progress]   │   │  [in progress]       │
-     └────────────────┘   └──────────────────┘   └──────────────────────┘
-              │
-     ┌────────────────┐
-     │ Unified Output │   { id, text/image, toxicity, hate, safe, latency_ms }
-     └────────────────┘
+
+Copy the environment template and fill it in:
+
+```bash
+cp .env.example .env
 ```
 
 ---
 
-## Quickstart
+## Configuration
 
-**Requirements:** Python 3.11+, Docker
+Argus uses two config files with a clear separation of concerns:
 
-### Run locally with Docker Compose
+**`config/training.yaml`** — committed to the repo, shared defaults for model, training, paths, and serving. You rarely need to edit this.
+
+**`.env`** — gitignored, your personal credentials and environment-specific overrides. Always required.
+
+### Minimal `.env` (local only, no Databricks)
+
+```env
+MLFLOW_TRACKING_URI=file:./mlruns
+MLFLOW_EXPERIMENT_NAME=argus
+```
+
+No credentials needed. The model is loaded from `models/text_toxicity/artifacts/` locally.
+
+### Full `.env` (with Databricks or other Model Registry)
+
+```env
+MLFLOW_TRACKING_URI=databricks
+MLFLOW_EXPERIMENT_NAME=/Users/you@email.com/argus
+DATABRICKS_HOST=https://your-workspace.azuredatabricks.net
+DATABRICKS_TOKEN=your-token
+
+# Pull model from Databricks registry at startup instead of local folder
+CMS_SERVING__MODEL_URI=models:/workspace.default.content-moderation-text@Production
+```
+
+**Any value in `training.yaml` can be overridden with a `CMS_`-prefixed env var, e.g. `CMS_TRAINING__EPOCHS=5`.**
+
+---
+
+## Serving
+
+### PyTorch backend (default)
+
+```bash
+uvicorn src.serving.app:app
+```
+
+On first start with `CMS_SERVING__MODEL_URI` set, the model is downloaded from the Model Registry. Subsequent starts use the cached download.
+
+Without `CMS_SERVING__MODEL_URI`, the model is loaded from `models/text_toxicity/artifacts/` locally.
+
+### ONNX backend (faster inference)
+
+First export the registered model to ONNX:
+
+```bash
+python -m src.optimization.export_onnx
+```
+
+Then serve with the ONNX backend:
+
+```bash
+CMS_SERVING__BACKEND=onnx CMS_SERVING__MODEL_URI=models/text_toxicity/onnx uvicorn src.serving.app:app
+```
+
+Re-run the export whenever you promote a new model version.
+
+### Docker Compose (full stack)
 
 ```bash
 docker compose up
@@ -79,82 +130,10 @@ docker compose up
 | Service | URL |
 |---|---|
 | Argus API | http://localhost:8000 |
-| API docs (Swagger) | http://localhost:8000/docs |
+| API docs | http://localhost:8000/docs |
 | MLflow | http://localhost:5001 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
-
-### Run API directly
-
-```bash
-pip install -e ".[serving]"
-make serve
-```
-
-### Moderate a piece of text
-
-```bash
-curl -X POST http://localhost:8000/v1/moderate/text \
-  -H "Content-Type: application/json" \
-  -d '{"id": "1", "content": "Your text here"}'
-```
-
-Response:
-
-```json
-{
-  "id": "1",
-  "text": "Your text here",
-  "toxicity": { "label": "toxicity", "score": 0.03, "flagged": false },
-  "hate":     { "label": "hate",     "score": 0.01, "flagged": false },
-  "safe": true,
-  "processing_time_ms": 18.4
-}
-```
-
----
-
-## Training
-
-```bash
-pip install -e ".[training]"
-
-# Preprocess Jigsaw dataset
-python src/data/jigsaw_preprocessing.py
-
-# Train text model (logs to MLflow)
-python src/training/train_text_model.py
-
-# Generate bias evaluation templates
-python scripts/generate_bias_templates.py
-
-# Run bias evaluation
-python scripts/run_bias_eval.py
-```
-
----
-
-## Fairness & Bias Evaluation
-
-Content moderation models are prone to **lexical bias** — disproportionately flagging content that merely mentions certain identity groups (e.g., "muslim", "gay", "woman") as toxic.
-
-Argus addresses this with a three-layer pipeline:
-
-### 1. Synthetic Templated Dataset
-Controlled toxic/non-toxic examples generated by swapping identity terms across a fixed template. This isolates lexical bias from genuine toxicity signal.
-
-### 2. Slice-Level Metrics
-For each identity group, the bias report (`models/text_toxicity/artifacts/bias_report.json`) records:
-- False Positive Rate (FPR) and True Positive Rate (TPR)
-- ROC-AUC and PR-AUC
-- Delta metrics vs. the non-group baseline (e.g. ΔFPR)
-
-### 3. CI Fairness Gate
-`tests/test_bias_constraints.py` enforces:
-- No group's ΔFPR may exceed **5 percentage points**
-- No extreme TPR divergence between groups
-
-A failing fairness test **blocks model promotion** in CI.
 
 ---
 
@@ -163,92 +142,113 @@ A failing fairness test **blocks model promotion** in CI.
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/v1/health` | Liveness check |
-| `GET` | `/v1/model/info` | Loaded model metadata |
-| `POST` | `/v1/moderate/text` | Moderate a text input |
+| `GET` | `/v1/model/info` | Loaded model metadata and thresholds |
+| `POST` | `/v1/moderate/text` | Moderate a single text input |
+| `POST` | `/v1/moderate/text/batch` | Moderate multiple texts in one request |
+| `GET` | `/metrics` | Prometheus metrics |
 
-Full interactive docs at `/docs` when the server is running.
+### Single prediction
 
----
+```bash
+curl -X POST http://localhost:8000/v1/moderate/text \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Your text here"}'
+```
 
-## Output Schemas
-
-**Text**
 ```json
 {
-  "id": "string",
-  "text": "string",
-  "toxicity": { "label": "toxicity", "score": 0.0, "flagged": false },
-  "hate":     { "label": "hate",     "score": 0.0, "flagged": false },
+  "id": "abc123",
+  "text": "Your text here",
+  "toxicity": { "prob": 0.03, "flagged": false },
+  "hate":     { "prob": 0.01, "flagged": false },
   "safe": true,
-  "processing_time_ms": 0.0
+  "processing_time_ms": 18.4
 }
 ```
 
-**Multimodal** *(training-time schema)*
-```json
-{
-  "id": "string",
-  "text": "string",
-  "image_path": "data/raw/...",
-  "hate": 0,
-  "source": "hateful_memes"
-}
+### Batch prediction
+
+```bash
+curl -X POST http://localhost:8000/v1/moderate/text/batch \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["First text", "Second text"]}'
 ```
 
 ---
 
-## Datasets
+## Training
 
-| Dataset | Modality | Used for |
-|---|---|---|
-| [Jigsaw Toxic Comments](https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge) | Text | Text model training |
-| [Facebook Hateful Memes](https://ai.meta.com/tools/hatefulmemes/) | Multimodal | Multimodal model *(in progress)* |
-| [MMHS150K](https://gombru.github.io/2019/10/09/MMHS/) | Multimodal | Multimodal model *(in progress)* |
+### 1. Get the data
+
+Download the [Jigsaw Toxic Comments dataset](https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge) and place `train.csv` at `data/raw/jigsaw/train.csv`.
+
+### 2. Preprocess
+
+```bash
+python -m src.data.jigsaw_preprocessing
+```
+
+### 3. Train
+
+```bash
+python -m src.training.train_text_model
+```
+
+Metrics, parameters, and the model artifact are logged to MLflow automatically. Edit `config/training.yaml` to change hyperparameters.
+
+### 4. Evaluate bias
+
+```bash
+python scripts/generate_bias_templates.py
+python scripts/run_bias_eval.py
+```
+
+### 5. Calibrate thresholds (optional, no retraining needed)
+
+```bash
+python scripts/threshold_sweep.py --plot
+```
+
+Shows F1-optimal vs. precision-at-recall thresholds side by side for each label.
+
+### 6. Promote to production
+
+Open the Databricks MLflow UI, find your run, and set the alias `Production` on the model version you want to serve. The serving layer will pick it up on next startup.
 
 ---
 
-## Tech Stack
+## Optimization
 
-| Layer | Technology |
+### Export to ONNX
+
+```bash
+python -m src.optimization.export_onnx
+```
+
+Downloads the `Production` model from the registry, converts to ONNX FP32, validates numerical equivalence (max abs diff < 1e-4), and writes to `models/text_toxicity/onnx/`.
+
+### Quantize to INT8
+
+```bash
+python -m src.optimization.quantize
+```
+
+Applies dynamic INT8 quantization and runs a bias comparison report (FP32 vs INT8) to verify that quantization doesn't disproportionately hurt fairness metrics.
+
+---
+
+## Fairness Pipeline
+
+Content moderation models are prone to **lexical bias** — flagging content that mentions identity groups (e.g. "muslim", "gay") rather than detecting genuine toxicity.
+
+Argus addresses this at every stage:
+
+| Stage | Technique |
 |---|---|
-| Model | PyTorch, HuggingFace Transformers |
-| Training tracking | MLflow |
-| Serving | FastAPI, Uvicorn |
-| Containerization | Docker, Docker Compose |
-| Observability | Prometheus, Grafana |
-| Testing | pytest |
-| Linting / types | Ruff, mypy |
-| CI | GitHub Actions |
-
----
-
-## Repo Structure
-
-```
-.
-├── assets/                     # Logos and static assets
-├── config/
-│   └── local_sensitive_words.json
-├── data/
-│   ├── raw/jigsaw/
-│   ├── preprocessed/text/
-│   └── bias_eval/
-├── models/
-│   └── text_toxicity/artifacts/
-├── monitoring/
-│   └── prometheus/
-├── notebooks/
-├── reports/
-├── scripts/
-│   ├── generate_bias_templates.py
-│   └── run_bias_eval.py
-├── src/
-│   ├── data/
-│   ├── serving/
-│   ├── training/
-│   └── utils/
-└── tests/
-```
+| Training | Counterfactual data augmentation (identity term swapping) |
+| Evaluation | Slice-level FPR/TPR across identity groups |
+| CI | Fairness gate blocks model promotion if ΔFPR > 5pp |
+| Optimization | Post-quantization fairness comparison (FP32 vs INT8) |
 
 ---
 
@@ -261,4 +261,57 @@ make lint        # ruff check
 make typecheck   # mypy
 make format      # auto-format
 make test-bias   # fairness constraint tests (requires model artifacts)
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Model | PyTorch, HuggingFace Transformers |
+| Inference | ONNX Runtime (optimum) |
+| Training tracking | MLflow (local or Databricks) |
+| Serving | FastAPI, Uvicorn |
+| Containerization | Docker, Docker Compose |
+| Observability | Prometheus, Grafana, OpenTelemetry |
+| Testing | pytest |
+| Linting / types | Ruff, mypy |
+| CI | GitHub Actions |
+
+---
+
+## Repo Structure
+
+```
+.
+├── config/
+│   ├── training.yaml              # shared config defaults
+│   └── local_sensitive_words.json
+├── data/
+│   ├── raw/jigsaw/
+│   ├── preprocessed/text/
+│   └── bias_eval/
+├── models/
+│   └── text_toxicity/
+│       ├── artifacts/             # PyTorch model + thresholds (local)
+│       ├── onnx/                  # ONNX FP32 export
+│       └── quantized/             # ONNX INT8 export
+├── monitoring/
+│   ├── prometheus/
+│   └── grafana/
+├── reports/
+├── scripts/
+│   ├── generate_bias_templates.py
+│   ├── run_bias_eval.py
+│   └── threshold_sweep.py
+├── src/
+│   ├── data/
+│   ├── optimization/
+│   ├── serving/
+│   ├── training/
+│   └── utils/
+├── tests/
+├── .env.example                   # copy to .env and fill in
+└── config/training.yaml
 ```
