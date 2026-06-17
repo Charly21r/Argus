@@ -15,8 +15,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
+
+# Load .env into os.environ early so MLflow SDK and all os.environ.get() calls see it.
+# override=False means real env vars (CI, prod infrastructure) always win.
+load_dotenv(override=False)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "config" / "training.yaml"
@@ -76,6 +81,9 @@ class OptimizationConfig(BaseModel):
 class ServingConfig(BaseModel):
     backend: Literal["pt", "onnx"] = "pt"
     onnx_provider: Literal["CPUExecutionProvider", "CUDAExecutionProvider"] = "CPUExecutionProvider"
+    # Override to load from MLflow registry: "models:/name@Production"
+    # If unset, falls back to paths.model_dir (local path).
+    model_uri: str | None = None
 
 
 class _YamlSource(PydanticBaseSettingsSource):
@@ -100,8 +108,6 @@ class Settings(BaseSettings):
     bias_eval: BiasEvalConfig = Field(default_factory=BiasEvalConfig)
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     serving: ServingConfig = Field(default_factory=ServingConfig)
-
-    mlflow_tracking_uri: str = "file:./mlruns"
 
     @classmethod
     def settings_customise_sources(

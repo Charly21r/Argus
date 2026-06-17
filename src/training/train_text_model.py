@@ -515,8 +515,7 @@ def main():
     if torch.backends.mps.is_available():
         torch.mps.manual_seed(seed)
 
-    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI") or cfg.mlflow_tracking_uri
-    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "file:./mlruns"))
     mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT_NAME", "text_toxicity_moderation"))
 
     if torch.cuda.is_available():

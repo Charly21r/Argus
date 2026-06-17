@@ -14,6 +14,7 @@ training:
   mixed_precision: true
   loss_fn: "bce"       # "bce" or "focal"
   focal_gamma: 2.0     # only used when loss_fn is "focal"
+  min_recall: 0.85     # recall floor for precision-at-recall threshold calibration
 
 data:
   raw_path: "data/raw/jigsaw/train.csv"
@@ -30,6 +31,11 @@ bias_eval:
   batch_size: 32
   max_fpr_delta: 0.05
 
+serving:
+  backend: "pt"                          # "pt" or "onnx"
+  onnx_provider: "CPUExecutionProvider"  # "CPUExecutionProvider" or "CUDAExecutionProvider"
+  # model_uri is intentionally absent — set CMS_SERVING__MODEL_URI in .env
+
 optimization:
   registered_model_name: "workspace.default.content-moderation-text"
   model_alias: "Production"
@@ -37,4 +43,3 @@ optimization:
   quantized_dir: "models/text_toxicity/quantized"
   validation_tolerance: 1.0e-4
 
-mlflow_tracking_uri: "file:./mlruns"

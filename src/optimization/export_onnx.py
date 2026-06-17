@@ -4,9 +4,9 @@ Usage:
     python -m src.optimization.export_onnx
 
 Environment variables (optional):
-    MLFLOW_TRACKING_URI            — overrides cfg.mlflow_tracking_uri
-    DATABRICKS_HOST                — required when tracking URI is "databricks"
-    DATABRICKS_TOKEN               — required when tracking URI is "databricks"
+    MLFLOW_TRACKING_URI            — MLflow tracking server ("databricks" or "file:./mlruns")
+    DATABRICKS_HOST                — required when MLFLOW_TRACKING_URI is "databricks"
+    DATABRICKS_TOKEN               — required when MLFLOW_TRACKING_URI is "databricks"
     CMS_OPTIMIZATION__MODEL_ALIAS  — override registry alias (default: Production)
     MODEL_VERSION                  — export a specific version instead of the alias
 """
@@ -35,7 +35,6 @@ ONNX_DIR = ROOT / _settings.optimization.onnx_dir
 VALIDATION_TOLERANCE = _settings.optimization.validation_tolerance
 MAX_LENGTH = _settings.model.max_length
 LABEL_COLS = _settings.model.label_cols
-TRACKING_URI = _settings.mlflow_tracking_uri
 
 
 def _find_dir_containing(root: Path, filename: str) -> Path:
@@ -76,7 +75,7 @@ def download_model(version: str | None = None) -> tuple[Path, dict]:
     logger.info("Found model in %s, tokenizer in %s", model_subdir, tokenizer_subdir)
 
     model = AutoModelForSequenceClassification.from_pretrained(model_subdir)
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_subdir)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_subdir, use_fast=True)
 
     hf_dir = ONNX_DIR.parent / "hf_export"
     hf_dir.mkdir(parents=True, exist_ok=True)
@@ -148,8 +147,9 @@ def save_thresholds(thresholds: dict, onnx_dir: Path) -> None:
 
 
 def main() -> None:
-    mlflow.set_tracking_uri(TRACKING_URI)
-    logger.info("MLflow tracking URI: %s", TRACKING_URI)
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "file:./mlruns")
+    mlflow.set_tracking_uri(tracking_uri)
+    logger.info("MLflow tracking URI: %s", tracking_uri)
 
     ONNX_DIR.mkdir(parents=True, exist_ok=True)
 

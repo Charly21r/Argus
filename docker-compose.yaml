@@ -1,13 +1,20 @@
 services:
 
   api:
-    depends_on:
-      - mlflow
     build: .
-    volumes:
-      - ./models:/app/models
+    env_file:
+      - .env
     environment:
-      - MODEL_PATH=models/text_toxicity/artifacts/model
+      # Set CMS_SERVING__MODEL_URI to a registry URI to pull from Databricks:
+      #   CMS_SERVING__MODEL_URI=models:/workspace.default.content-moderation-text@Production
+      # Leave unset to load from the local volume path below.
+      - CMS_SERVING__MODEL_URI=${CMS_SERVING__MODEL_URI:-}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-}
+      - DATABRICKS_HOST=${DATABRICKS_HOST:-}
+      - DATABRICKS_TOKEN=${DATABRICKS_TOKEN:-}
+    volumes:
+      # Local model cache — used when CMS_SERVING__MODEL_URI is unset
+      - ./models:/app/models
     ports:
       - "8000:8000"
 
