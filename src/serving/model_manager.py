@@ -40,6 +40,15 @@ def _resolve_paths(uri: str) -> tuple[Path, Path]:
                 "Either restore the models/ directory or set CMS_SERVING__MODEL_URI to a registry URI."
             )
 
+    # Flat ONNX layout: model.onnx lives directly in root (produced by export_onnx.py).
+    # When downloaded from MLflow registry, sidecar files (tokenizer, thresholds) are
+    # in an extra_files/ subdirectory created by mlflow.onnx.log_model(extra_files=...).
+    if (root / "model.onnx").exists():
+        extra = root / "extra_files"
+        tokenizer_path = extra if extra.is_dir() else root
+        return root, tokenizer_path
+
+    # MLflow transformers flavor: model/ subdir + components/tokenizer/ subdir
     model_nested = root / "model"
     model_path = model_nested if (model_nested / "config.json").exists() else root
 
@@ -108,7 +117,9 @@ def load_model() -> None:
         provider = _settings.serving.onnx_provider
         _model = ORTModelForSequenceClassification.from_pretrained(model_path, provider=provider)
         _device = "cuda" if provider == "CUDAExecutionProvider" else "cpu"
-        thresholds_path = model_path / "thresholds.json"
+        # Registry downloads place sidecar files in extra_files/; local exports keep them flat
+        extra = model_path / "extra_files"
+        thresholds_path = (extra / "thresholds.json") if extra.is_dir() else (model_path / "thresholds.json")
 
     else:
         raise ValueError(f"Unknown backend {backend!r}. Set CMS_SERVING__BACKEND to 'pt' or 'onnx'.")

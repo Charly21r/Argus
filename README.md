@@ -113,13 +113,23 @@ First export the registered model to ONNX:
 python -m src.optimization.export_onnx
 ```
 
-Then serve with the ONNX backend:
+This downloads the `Production` PyTorch model from the registry, converts it to ONNX FP32, validates numerical equivalence, and does two things:
+- Writes the ONNX model locally to `models/text_toxicity/onnx/`
+- Registers it in the MLflow Model Registry as `content-moderation-text-onnx`
+
+Serve with the ONNX backend — local:
 
 ```bash
 CMS_SERVING__BACKEND=onnx CMS_SERVING__MODEL_URI=models/text_toxicity/onnx uvicorn src.serving.app:app
 ```
 
-Re-run the export whenever you promote a new model version.
+Or directly from the registry:
+
+```bash
+CMS_SERVING__BACKEND=onnx CMS_SERVING__MODEL_URI="models:/workspace.default.content-moderation-text-onnx@Production" uvicorn src.serving.app:app
+```
+
+Re-run the export whenever you promote a new PyTorch model version. Then set the `Production` alias on the new ONNX version in the Databricks UI.
 
 ### Docker Compose (full stack)
 
@@ -171,7 +181,7 @@ curl -X POST http://localhost:8000/v1/moderate/text \
 ```bash
 curl -X POST http://localhost:8000/v1/moderate/text/batch \
   -H "Content-Type: application/json" \
-  -d '{"texts": ["First text", "Second text"]}'
+  -d '{"items": [{"content": "First text"}, {"content": "Second text"}]}'
 ```
 
 ---

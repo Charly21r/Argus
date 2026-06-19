@@ -30,6 +30,7 @@ _settings = get_settings()
 ROOT = Path(__file__).resolve().parents[2]
 
 REGISTERED_MODEL_NAME = _settings.optimization.registered_model_name
+ONNX_REGISTERED_MODEL_NAME = _settings.optimization.onnx_registered_model_name
 MODEL_ALIAS = _settings.optimization.model_alias
 ONNX_DIR = ROOT / _settings.optimization.onnx_dir
 VALIDATION_TOLERANCE = _settings.optimization.validation_tolerance
@@ -146,6 +147,61 @@ def save_thresholds(thresholds: dict, onnx_dir: Path) -> None:
     logger.info("Thresholds saved to %s", thresholds_path)
 
 
+def register_onnx_model(onnx_dir: Path, source_version: str) -> None:
+    """Log the ONNX model + tokenizer + thresholds to MLflow and register as a new version."""
+    import numpy as np
+    import onnx as onnx_lib
+    from mlflow.models import ModelSignature
+    from mlflow.types import Schema, TensorSpec
+
+    onnx_model = onnx_lib.load(str(onnx_dir / "model.onnx"))
+    run_name = f"onnx-export-v{source_version}"
+    artifact_path = "model"
+
+    # Unity Catalog requires a signature — describe the tokenizer output / logits shape
+    signature = ModelSignature(
+        inputs=Schema(
+            [
+                TensorSpec(np.dtype("int64"), (-1, -1), name="input_ids"),
+                TensorSpec(np.dtype("int64"), (-1, -1), name="attention_mask"),
+            ]
+        ),
+        outputs=Schema(
+            [
+                TensorSpec(np.dtype("float32"), (-1, len(LABEL_COLS)), name="logits"),
+            ]
+        ),
+    )
+
+    # Tokenizer + threshold files to bundle alongside the ONNX weights
+    sidecar_names = [
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "vocab.json",
+        "merges.txt",
+        "thresholds.json",
+    ]
+    extra_files = [str(onnx_dir / n) for n in sidecar_names if (onnx_dir / n).exists()]
+
+    with mlflow.start_run(run_name=run_name):
+        mlflow.log_param("source_pt_version", source_version)
+        logged = mlflow.onnx.log_model(
+            onnx_model,
+            name=artifact_path,
+            signature=signature,
+            extra_files=extra_files,
+        )
+
+    mv = mlflow.register_model(logged.model_uri, ONNX_REGISTERED_MODEL_NAME)
+    logger.info(
+        "Registered ONNX model as '%s' version %s",
+        ONNX_REGISTERED_MODEL_NAME,
+        mv.version,
+    )
+
+
 def main() -> None:
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "file:./mlruns")
     mlflow.set_tracking_uri(tracking_uri)
@@ -157,8 +213,18 @@ def main() -> None:
     local_path, thresholds = download_model(version)
 
     export_to_onnx(local_path, ONNX_DIR)
-    validate(local_path, ONNX_DIR)
+    max_diff = validate(local_path, ONNX_DIR)
     save_thresholds(thresholds, ONNX_DIR)
+
+    # Get the source version string for the run name
+    client = mlflow.tracking.MlflowClient()
+    if version:
+        mv = client.get_model_version(REGISTERED_MODEL_NAME, version)
+    else:
+        mv = client.get_model_version_by_alias(REGISTERED_MODEL_NAME, MODEL_ALIAS)
+
+    logger.info("Registering ONNX model in MLflow (max_diff=%.2e)...", max_diff)
+    register_onnx_model(ONNX_DIR, mv.version)
 
 
 if __name__ == "__main__":

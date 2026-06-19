@@ -38,6 +38,7 @@ serving:
 
 optimization:
   registered_model_name: "workspace.default.content-moderation-text"
+  onnx_registered_model_name: "workspace.default.content-moderation-text-onnx"
   model_alias: "Production"
   onnx_dir: "models/text_toxicity/onnx"
   quantized_dir: "models/text_toxicity/quantized"
