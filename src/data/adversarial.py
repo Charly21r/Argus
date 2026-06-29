@@ -1,14 +1,7 @@
-from random import Random
 from collections.abc import Callable
+from random import Random
 
-LEETMAP = {
-    "a": ["@", "4"],
-    "e": ["3"],
-    "i": ["1"],
-    "o": ["0"],
-    "s": ["$", "5"],
-    "t": ["7"]
-}
+LEETMAP = {"a": ["@", "4"], "e": ["3"], "i": ["1"], "o": ["0"], "s": ["$", "5"], "t": ["7"]}
 
 
 def leetspeak(text: str, rng: Random, intensity: float = 1.0) -> str:
@@ -23,7 +16,8 @@ def leetspeak(text: str, rng: Random, intensity: float = 1.0) -> str:
 
 
 def whitespace_inject(text: str, rng: Random, intensity: float = 1.0, separator=" ") -> str:
-    if len(text) == 0: return text
+    if len(text) == 0:
+        return text
     out = [text[0]]
 
     for c in text[1:]:
@@ -33,9 +27,7 @@ def whitespace_inject(text: str, rng: Random, intensity: float = 1.0, separator=
     return "".join(out)
 
 
-
 ATTACKS: dict[str, Callable[..., str]] = {
     "leetspeak": leetspeak,
     "whitespace_inject": whitespace_inject,
 }
-
